@@ -473,6 +473,7 @@ recomp::mods::CodeModLoadError recomp::mods::DynamicLibraryCodeHandle::populate_
     return CodeModLoadError::Good;
 }
 
+#if N64RECOMP_ENABLE_LIVE_RECOMP
 recomp::mods::LiveRecompilerCodeHandle::LiveRecompilerCodeHandle(
     const N64Recomp::Context& context, const ModCodeHandleInputs& inputs,
     std::unordered_map<size_t, size_t>&& entry_func_hooks, std::unordered_map<size_t, size_t>&& return_func_hooks, std::vector<size_t>&& original_section_indices, bool regenerated)
@@ -549,6 +550,28 @@ recomp::mods::CodeModLoadError recomp::mods::LiveRecompilerCodeHandle::populate_
 recomp::mods::GenericFunction recomp::mods::LiveRecompilerCodeHandle::get_function_handle(size_t func_index) {
     return GenericFunction{ recompiler_output->functions[func_index] };
 }
+
+#else
+
+// Static iOS builds must not request executable memory. Keep the mod ABI intact,
+// but report live code modules as unavailable instead of pulling in SLJIT.
+recomp::mods::LiveRecompilerCodeHandle::LiveRecompilerCodeHandle(
+    const N64Recomp::Context&, const ModCodeHandleInputs& inputs,
+    std::unordered_map<size_t, size_t>&&, std::unordered_map<size_t, size_t>&&, std::vector<size_t>&&, bool)
+    : base_event_index(inputs.base_event_index) {}
+
+void recomp::mods::LiveRecompilerCodeHandle::set_imported_function(size_t, GenericFunction) {}
+
+recomp::mods::CodeModLoadError recomp::mods::LiveRecompilerCodeHandle::populate_reference_symbols(
+    const N64Recomp::Context&, std::string&) {
+    return CodeModLoadError::Good;
+}
+
+recomp::mods::GenericFunction recomp::mods::LiveRecompilerCodeHandle::get_function_handle(size_t) {
+    return GenericFunction{ static_cast<recomp_func_t*>(nullptr) };
+}
+
+#endif
 
 void patch_func(recomp_func_t* target_func, recomp::mods::GenericFunction replacement_func) {
     uint8_t* target_func_u8 = reinterpret_cast<uint8_t*>(target_func);

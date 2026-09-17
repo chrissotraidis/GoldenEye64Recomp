@@ -473,6 +473,202 @@ void InitFrameRateControl(void)
 extern s32 g_DebugMode;
 extern s32 g_DebugHighlightedOption;
 
+#define GOLDENPAD_AUTHENTIC_FRAME_COST 3
+#define GOLDENPAD_AUTOMATIC_RATE_OFFSET 0x22
+
+static s32 goldenpadScaleAutomaticFiringRate(s32 rawRate)
+{
+    return rawRate > 0 ? rawRate * GOLDENPAD_AUTHENTIC_FRAME_COST : rawRate;
+}
+
+/* The shared getter feeds Bond's and guards' positive automatic modulo gates.
+ * Its other retail call sites only test the sign, so preserving zero/negative
+ * values keeps semi-automatic, accuracy, animation, and first-shot behavior. */
+RECOMP_PATCH s8 bondwalkItemGetAutomaticFiringRate(ITEM_IDS item)
+{
+    const s8 rawRate = ((s8*) get_ptr_item_statistics(item))[GOLDENPAD_AUTOMATIC_RATE_OFFSET];
+
+    return (s8) goldenpadScaleAutomaticFiringRate(rawRate);
+}
+
+RECOMP_PATCH s32 get_debug_enable_all_levels_flag(void)
+{
+    return goldenpad_recomp_unlock_all_missions_enabled();
+}
+
+static f32 goldenpadWrapTankAngle(f32 angle)
+{
+    while (angle < 0.0f) {
+        angle += M_TAU_F;
+    }
+    while (angle >= M_TAU_F) {
+        angle -= M_TAU_F;
+    }
+    return angle;
+}
+
+static void goldenpadApplyModernTouchControls(void)
+{
+    static s32 crouched[4] = {FALSE, FALSE, FALSE, FALSE};
+    s32 playernum = get_cur_playernum();
+    s32 inventorySlot;
+    f32 lookX = 0.0f;
+    f32 lookY = 0.0f;
+    f32 degreesPerFrame;
+    s32 tankRunning;
+    s32 mouseCameraAimHeld;
+    const s32 tankRunStateRunning = 2; /* TANK_RUN_STATE_RUNNING in bondconstants.h */
+
+    if (goldenpad_recomp_consume_return_to_title()) {
+        crouched[0] = FALSE;
+        crouched[1] = FALSE;
+        crouched[2] = FALSE;
+        crouched[3] = FALSE;
+        if (g_StageNum != LEVELID_TITLE) {
+            bossRunTitleStage();
+        }
+        return;
+    }
+
+    tankRunning = g_PlayerIsInTank == 1 &&
+        g_PlayerTankProp != NULL &&
+        g_EnterTankAudioState == tankRunStateRunning;
+    mouseCameraAimHeld = goldenpad_recomp_mouse_camera_aim_active(playernum);
+
+    if (playernum < 0 || playernum >= 4 || g_StageNum == LEVELID_TITLE || g_CurrentPlayer == NULL ||
+        g_CurrentPlayer->prop == NULL || g_CurrentPlayer->bonddead) {
+        if (playernum >= 0 && playernum < 4) {
+            crouched[playernum] = FALSE;
+            goldenpad_recomp_consume_crouch_toggle(playernum);
+            goldenpad_recomp_consume_reload(playernum);
+            goldenpad_recomp_consume_inventory_slot(playernum);
+        }
+        return;
+    }
+
+    if (g_CurrentPlayer->watch_animation_state == 0 &&
+        g_CurrentPlayer->outside_watch_menu != 0 &&
+        g_CurrentPlayer->open_close_solo_watch_menu == 0) {
+        recomp_get_camera_inputs(playernum, &lookX, &lookY);
+    } else {
+        /* Drain a final queued sample without moving the camera behind the watch. */
+        recomp_get_camera_inputs(playernum, &lookX, &lookY);
+        goldenpad_recomp_consume_reload(playernum);
+        goldenpad_recomp_consume_inventory_slot(playernum);
+        lookX = 0.0f;
+        lookY = 0.0f;
+    }
+
+    /* The native 45-tick hatch transition owns the camera and movement until
+     * the tank reaches its running state. Drain modern look without applying it. */
+    if (g_PlayerIsInTank == 1 && !tankRunning) {
+        lookX = 0.0f;
+        lookY = 0.0f;
+    }
+
+    if (lookX != 0.0f || lookY != 0.0f || mouseCameraAimHeld) {
+        /* GoldenPad's tuned MGB64 path resolves to 3 degrees per frame at
+         * full deflection, and one third of that while aiming. */
+        degreesPerFrame = g_CurrentPlayer->insightaimmode ? 1.0f : 3.0f;
+        if (tankRunning) {
+            /* Mounted yaw is rebuilt from these authoritative turret values
+             * every simulation tick. Shift target and smoothed orientation
+             * together so relative look remains proportional and native tank
+             * steering, collision rollback, and interpolation stay in charge. */
+            const f32 delta = lookX * degreesPerFrame * (M_TAU_F / 360.0f);
+            g_TankTurretAngle = goldenpadWrapTankAngle(g_TankTurretAngle + delta);
+            g_TankTurretOrientationAngleRad = goldenpadWrapTankAngle(
+                g_TankTurretOrientationAngleRad + delta);
+            /* US/NTSC tank smoothing is 0.92, so this accumulator stores
+             * current / (1 - smoothing), exactly as native bondview2 does. */
+            g_TankTurretOrientationAngleDeg = g_TankTurretOrientationAngleRad / 0.08f;
+        } else {
+            g_CurrentPlayer->vv_theta += lookX * degreesPerFrame;
+            while (g_CurrentPlayer->vv_theta < 0.0f) {
+                g_CurrentPlayer->vv_theta += 360.0f;
+            }
+            while (g_CurrentPlayer->vv_theta >= 360.0f) {
+                g_CurrentPlayer->vv_theta -= 360.0f;
+            }
+        }
+        g_CurrentPlayer->vv_verta += lookY * degreesPerFrame;
+        if (g_CurrentPlayer->vv_verta > 90.0f) {
+            g_CurrentPlayer->vv_verta = 90.0f;
+        }
+        if (g_CurrentPlayer->vv_verta < (tankRunning ? -20.0f : -90.0f)) {
+            g_CurrentPlayer->vv_verta = tankRunning ? -20.0f : -90.0f;
+        }
+        g_CurrentPlayer->vv_verta360 = g_CurrentPlayer->vv_verta;
+        if (g_CurrentPlayer->vv_verta360 < 0.0f) {
+            g_CurrentPlayer->vv_verta360 += 360.0f;
+        }
+        /* Native tank aiming deliberately preserves hull velocity. Outside the
+         * tank, cancel native yaw so modern right-stick yaw is not doubled. */
+        if (!tankRunning) {
+            g_CurrentPlayer->speedtheta = 0.0f;
+        }
+        g_CurrentPlayer->speedverta = 0.0f;
+        bondviewApplyVertaTheta();
+    }
+
+    if (goldenpad_recomp_consume_crouch_toggle(playernum)) {
+        crouched[playernum] = !crouched[playernum];
+        /* GoldenEye's native crouch enum is squat=0, half=1, stand=2. */
+        g_CurrentPlayer->crouchpos = crouched[playernum] ? 0 : 2;
+    }
+
+    if (goldenpad_recomp_consume_reload(playernum)) {
+        attempt_reload_item_in_hand(GUNRIGHT);
+        attempt_reload_item_in_hand(GUNLEFT);
+    }
+
+    inventorySlot = goldenpad_recomp_consume_inventory_slot(playernum);
+    if (inventorySlot >= 0 && inventorySlot < bondinvCountTotalItemsInInv()) {
+        s32 item = bondinvGetTextbyInvIndex(inventorySlot);
+        if (item >= 0 && item != getCurrentPlayerWeaponId(GUNRIGHT)) {
+            currentPlayerUnEquipWeaponWrapper(GUNRIGHT, item);
+            currentPlayerUnEquipWeaponWrapper(GUNLEFT, ITEM_UNARMED);
+            bondinvSetCurEquippedItem(inventorySlot);
+        }
+    }
+}
+
+static void goldenpadSampleGuardFire(struct ChrRecord* chr, s32 hand)
+{
+    PropRecord* weaponProp = chrGetEquippedWeaponProp(chr, hand);
+    u8* chrBytes = (u8*) chr;
+    s32 item = -1;
+    u8 before = chrBytes[0x04 + hand];
+
+    if (weaponProp != NULL && weaponProp->chr != NULL) {
+        item = ((s8*) weaponProp->chr)[0x80];
+    }
+
+    chrlvFireWeaponRelated(chr, hand);
+    goldenpad_recomp_fire_rate_guard_sample(
+        item, before, chrBytes[0x04 + hand], ((u32) chr & ~1u) | (u32) hand);
+}
+
+RECOMP_PATCH void chrlvTriggerFireWeapon(struct ChrRecord* chr)
+{
+    const u16 fireWeaponLeft = 0x0004;
+    const u16 fireWeaponRight = 0x0008;
+    const u16 fireTracer = 0x0080;
+    u16* hidden = (u16*) &((u8*) chr)[0x12];
+
+    *hidden &= ~fireTracer;
+
+    if (*hidden & fireWeaponRight) {
+        goldenpadSampleGuardFire(chr, GUNRIGHT);
+        *hidden &= ~fireWeaponRight;
+    }
+
+    if (*hidden & fireWeaponLeft) {
+        goldenpadSampleGuardFire(chr, GUNLEFT);
+        *hidden &= ~fireWeaponLeft;
+    }
+}
+
 RECOMP_PATCH void bossMainloop(void) {
     // declarations
 
@@ -702,6 +898,12 @@ RECOMP_PATCH void bossMainloop(void) {
                                     viSetViewPosition(localPlayer->viewleft, localPlayer->viewtop);
 
                                     lvlViewMoveTick();
+                                    goldenpadApplyModernTouchControls();
+                                    goldenpad_recomp_fire_rate_player_sample(
+                                        get_cur_playernum(),
+                                        g_CurrentPlayer->hands[GUNRIGHT].weaponnum,
+                                        g_CurrentPlayer->hands[GUNRIGHT].weapon_ammo_in_magazine,
+                                        g_CurrentPlayer->hands[GUNRIGHT].field_88C);
                                 }
                             }
 

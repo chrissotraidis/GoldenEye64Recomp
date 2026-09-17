@@ -117,6 +117,24 @@ int recomp_printf(const char* fmt, ...);
     extern u8 identifier[]
 
 float recomp_get_aspect_ratio(float);
+void recomp_get_camera_inputs(s32 controllernum, float* x, float* y);
+s32 goldenpad_recomp_mouse_camera_aim_active(s32 controllernum);
+s32 goldenpad_recomp_consume_crouch_toggle(s32 controllernum);
+s32 goldenpad_recomp_unlock_all_missions_enabled(void);
+s32 goldenpad_recomp_consume_return_to_title(void);
+s32 goldenpad_recomp_consume_reload(s32 controllernum);
+s32 goldenpad_recomp_consume_inventory_slot(s32 controllernum);
+void goldenpad_recomp_fire_rate_player_sample(
+    s32 playernum, s32 weapon, s32 ammo, s32 counter);
+void goldenpad_recomp_fire_rate_guard_sample(
+    s32 item, s32 before, s32 after, u32 guardKey);
+void* get_ptr_item_statistics(s32 item);
+s32 getCurrentPlayerWeaponId(s32 hand);
+void attempt_reload_item_in_hand(s32 hand);
+s32 bondinvCountTotalItemsInInv(void);
+s32 bondinvGetTextbyInvIndex(s32 index);
+void currentPlayerUnEquipWeaponWrapper(s32 hand, s32 item);
+void bondinvSetCurEquippedItem(s32 index);
 void recomp_crash(const char* err);
 
 #endif

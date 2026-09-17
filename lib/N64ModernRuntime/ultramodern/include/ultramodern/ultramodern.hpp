@@ -151,7 +151,10 @@ void set_callbacks(
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-//#define debug_printf(...)
-#define debug_printf(...) printf(__VA_ARGS__);
+#if defined(N64MODERNRUNTIME_VERBOSE_LOGGING)
+#define debug_printf(...) printf(__VA_ARGS__)
+#else
+#define debug_printf(...) ((void)0)
+#endif
 
 #endif

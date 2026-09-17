@@ -4,8 +4,10 @@
 #if 1
 RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, SkyRelated38* v3, f32 scale,
                                     bool textured) {
-    u32 width = viGetX();
-    u32 height = viGetY();
+    u32 left = viGetViewLeft();
+    u32 top = viGetViewTop();
+    u32 right = left + viGetViewWidth();
+    u32 bottom = top + viGetViewHeight();
 
     // Fetch the current environment (this is where fog and sky color are stored)
     struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
@@ -21,9 +23,15 @@ RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, Sky
     // Fill the skybox with the fog color
     gDPPipeSync(gdl++);
     gDPSetCycleType(gdl++, G_CYC_FILL);
-    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, width, osViGetCurrentFramebuffer());
+    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+    if (left == 0 && right == viGetX()) {
+        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+            0, top, 0, bottom);
+    } else {
+        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
+    }
     gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
-    gDPFillRectangle(gdl++, 0, 0, (width - 1), (height - 1));
+    gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
     gDPPipeSync(gdl++);
 
     return gdl;
@@ -31,8 +39,10 @@ RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, Sky
 
 RECOMP_PATCH Gfx* skyRenderFull(Gfx* gdl, SkyRelated38* arg1, SkyRelated38* arg2, SkyRelated38* arg3,
                                     SkyRelated38* arg4, f32 arg5) {
-    u32 width = viGetX();
-    u32 height = viGetY();
+    u32 left = viGetViewLeft();
+    u32 top = viGetViewTop();
+    u32 right = left + viGetViewWidth();
+    u32 bottom = top + viGetViewHeight();
 
     // Fetch the current environment to get fog color
     struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
@@ -48,9 +58,15 @@ RECOMP_PATCH Gfx* skyRenderFull(Gfx* gdl, SkyRelated38* arg1, SkyRelated38* arg2
     // Fill the skybox with the fog color
     gDPPipeSync(gdl++);
     gDPSetCycleType(gdl++, G_CYC_FILL);
-    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, width, osViGetCurrentFramebuffer());
+    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+    if (left == 0 && right == viGetX()) {
+        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+            0, top, 0, bottom);
+    } else {
+        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
+    }
     gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
-    gDPFillRectangle(gdl++, 0, 0, (width - 1), (height - 1));
+    gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
     gDPPipeSync(gdl++);
 
     return gdl;

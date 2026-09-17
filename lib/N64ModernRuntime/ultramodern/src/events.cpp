@@ -200,12 +200,16 @@ static void send_complete_retry(PTR(OSMesgQueue) mq, OSMesg msg) {
 }
 
 void sp_complete() {
+#if defined(N64MODERNRUNTIME_VERBOSE_LOGGING)
     fprintf(stderr, "[complete] SP -> mq %08X msg %08X\n", (uint32_t)events_context.sp.mq, (uint32_t)events_context.sp.msg);
+#endif
     send_complete_retry(events_context.sp.mq, events_context.sp.msg);
 }
 
 void dp_complete() {
+#if defined(N64MODERNRUNTIME_VERBOSE_LOGGING)
     fprintf(stderr, "[complete] DP -> mq %08X msg %08X\n", (uint32_t)events_context.dp.mq, (uint32_t)events_context.dp.msg);
+#endif
     send_complete_retry(events_context.dp.mq, events_context.dp.msg);
 }
 

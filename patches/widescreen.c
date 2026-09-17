@@ -19,16 +19,24 @@ RECOMP_PATCH Gfx* dynGetMasterDisplayList(void) {
 RECOMP_PATCH Gfx* zbufClearCurrentPlayer(Gfx* gdl) {
     s32 start_x;
     s32 end_x;
+    s32 clear_buffer = z_buffer;
+    s32 clear_top = viGetViewTop();
+    s32 clear_bottom = clear_top + viGetViewHeight();
+
+    // GoldenEye aliases the lower viewports back onto the same physical depth
+    // allocation by shifting their depth-image base one logical screen upward.
+    // RT64 identifies depth clears by exact image address, so issue the clear
+    // through the same shifted address and the viewport's original Y range.
+    if ((get_cur_playernum() >= 2)
+            || ((getPlayerCount() == 2) && (get_cur_playernum() == 1))) {
+        clear_buffer -= SCREEN_WIDTH * SCREEN_HEIGHT;
+    }
 
     gDPPipeSync(gdl++);
     gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
-    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, z_buffer_width, OS_K0_TO_PHYSICAL(z_buffer));
+    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, z_buffer_width, OS_K0_TO_PHYSICAL(clear_buffer));
     gDPSetCycleType(gdl++, G_CYC_FILL);
     gDPSetFillColor(gdl++, (GPACK_ZDZ(G_MAXFBZ, 0) << 16 | GPACK_ZDZ(G_MAXFBZ, 0)));
-
-    // @recomp: use gEXSetScissor instead
-    // gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, viGetX(), viGetY());
-    gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT, 0, 0, 0, 240);
 
     if (getPlayerCount() < 3) {
         start_x = 0;
@@ -41,7 +49,14 @@ RECOMP_PATCH Gfx* zbufClearCurrentPlayer(Gfx* gdl) {
         end_x = viGetX() - 1;
     }
 
-    gDPFillRectangle(gdl++, start_x, 0, end_x + 240, (z_buffer_height - 1));
+    if (getPlayerCount() < 3) {
+        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+            0, clear_top, 0, clear_bottom);
+    } else {
+        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, start_x, clear_top, end_x + 1, clear_bottom);
+    }
+
+    gDPFillRectangle(gdl++, start_x, clear_top, end_x, clear_bottom - 1);
     gDPPipeSync(gdl++);
 
     return gdl;
@@ -68,9 +83,12 @@ RECOMP_PATCH Gfx* bgScissorCurrentPlayerView(Gfx* gdl, s32 left, s32 top, s32 wi
         height = player->viewtop + player->viewy;
     }
 
-    // @recomp: use gEXSetScissor instead
-    // gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, width, height);
-    gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT, 0, 0, 0, 240);
+    if (player->viewleft == 0 && player->viewx == viGetX()) {
+        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+            left, top, width - viGetX(), height);
+    } else {
+        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, width, height);
+    }
 
     return gdl;
 }
@@ -113,11 +131,18 @@ RECOMP_PATCH Gfx* currentPlayerDrawFade(Gfx* gdl) {
         gDPSetCombineMode(gdl++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
         gDPSetPrimColor(gdl++, 0, 0, r, g, b, (s32) (frac * 255.0f));
 
-        // gDPFillRectangle(gdl++, viGetViewLeft(), viGetViewTop(), (viGetViewLeft() + viGetViewWidth()),
-        // (viGetViewTop() + viGetViewHeight()));
-
-        // @recomp: Remove margins
-        gDPFillRectangle(gdl++, 0, 0, 320, 240);
+        if (viGetViewLeft() == 0 && viGetViewWidth() == viGetX()) {
+            gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+                0, viGetViewTop(), 0, viGetViewTop() + viGetViewHeight());
+        } else {
+            gDPSetScissor(gdl++, G_SC_NON_INTERLACE,
+                viGetViewLeft(), viGetViewTop(),
+                viGetViewLeft() + viGetViewWidth(), viGetViewTop() + viGetViewHeight());
+        }
+        gDPFillRectangle(gdl++,
+            viGetViewLeft(), viGetViewTop(),
+            viGetViewLeft() + viGetViewWidth() - 1,
+            viGetViewTop() + viGetViewHeight() - 1);
 
         gDPPipeSync(gdl++);
         gDPSetColorDither(gdl++, G_CD_BAYER);

@@ -57,7 +57,16 @@ if (WIN32)
 endif()
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/../thirdparty/miniz ${CMAKE_CURRENT_BINARY_DIR}/miniz)
+set(N64RECOMP_ENABLE_LIVE_RECOMP ${N64MODERNRUNTIME_ENABLE_LIVE_RECOMP} CACHE BOOL
+    "Build N64Recomp's SLJIT live-recompiler path")
 add_subdirectory(${PROJECT_SOURCE_DIR}/../N64Recomp ${CMAKE_CURRENT_BINARY_DIR}/N64Recomp EXCLUDE_FROM_ALL)
 
-target_link_libraries(librecomp PRIVATE ultramodern N64Recomp LiveRecomp)
+target_compile_definitions(librecomp PRIVATE
+    N64RECOMP_ENABLE_LIVE_RECOMP=$<BOOL:${N64MODERNRUNTIME_ENABLE_LIVE_RECOMP}>
+)
+
+target_link_libraries(librecomp PRIVATE ultramodern N64Recomp)
+if (N64MODERNRUNTIME_ENABLE_LIVE_RECOMP)
+    target_link_libraries(librecomp PRIVATE LiveRecomp)
+endif()
 target_link_libraries(librecomp PUBLIC miniz)

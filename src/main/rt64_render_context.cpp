@@ -1,5 +1,11 @@
 #include <memory>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#if __has_include(<TargetConditionals.h>)
+#include <TargetConditionals.h>
+#endif
 
 // Undefine problematic X11 macros before including RT64 headers
 #ifdef None
@@ -23,6 +29,11 @@
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
 
+#ifdef MIN
+#undef MIN
+#endif
+#include <os/log.h>
+
 #include "zelda_render.h"
 #include "recomp_ui.h"
 
@@ -33,6 +44,13 @@ static bool high_precision_fb_enabled = false;
 static uint8_t DMEM[0x1000];
 static uint8_t IMEM[0x1000];
 
+static std::atomic<uint64_t> goldenpad_display_list_count = 0;
+static std::atomic<uint64_t> goldenpad_screen_update_count = 0;
+static std::atomic<uint64_t> goldenpad_presented_count = 0;
+extern "C" int32_t goldenpad_recomp_is_app_active();
+extern "C" int32_t goldenpad_recomp_three_point_filtering_enabled();
+extern "C" void goldenpad_recomp_note_display_list(uint64_t count);
+extern "C" void goldenpad_recomp_note_screen_progress(uint64_t updates, uint64_t presented);
 unsigned int MI_INTR_REG = 0;
 
 unsigned int DPC_START_REG = 0;
@@ -249,6 +267,12 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     // Set up the RT64 application configuration fields.
     RT64::ApplicationConfiguration appConfig;
     appConfig.useConfigurationFile = false;
+#if TARGET_OS_IPHONE
+    // The data-container root is not writable on physical iPadOS devices.
+    // Keep RT64's private artifacts in the app's writable support directory.
+    appConfig.detectDataPath = false;
+    appConfig.dataPath = std::filesystem::path(std::getenv("HOME")) / "Library/Application Support/GoldenPadRecompRT64";
+#endif
 
     // Create the RT64 application.
     app = std::make_unique<RT64::Application>(appCore, appConfig);
@@ -256,6 +280,7 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     // Set initial user config settings based on the current settings.
     auto& cur_config = ultramodern::renderer::get_graphics_config();
     set_application_user_config(app.get(), cur_config);
+    app->userConfig.threePointFiltering = goldenpad_recomp_three_point_filtering_enabled() != 0;
     app->userConfig.developerMode = debug;
     // Force gbi depth branches to prevent LODs from kicking in.
     app->enhancementConfig.f3dex.forceBranch = true;
@@ -283,6 +308,7 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     thread_id = window_handle.thread_id;
 #endif
     setup_result = map_setup_result(app->setup(thread_id));
+    fprintf(stderr, "[GoldenPadRecomp] render: RT64 setup %s\n", setup_result == ultramodern::renderer::SetupResult::Success ? "ready" : "failed");
     if (setup_result != ultramodern::renderer::SetupResult::Success) {
         app = nullptr;
         return;
@@ -311,15 +337,42 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
 zelda64::renderer::RT64Context::~RT64Context() = default;
 
 void zelda64::renderer::RT64Context::send_dl(const OSTask* task) {
+    const uint64_t count = goldenpad_display_list_count.fetch_add(1) + 1;
+    goldenpad_recomp_note_display_list(count);
+    if (count == 1 || count % 300 == 0) {
+        fprintf(stderr, "[GoldenPadRecomp] render: processed %llu display lists\n",
+            static_cast<unsigned long long>(count));
+        os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT,
+            "[GoldenPadRecomp] render: processed %{public}llu display lists",
+            static_cast<unsigned long long>(count));
+    }
     app->state->rsp->reset();
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
 }
 
 void zelda64::renderer::RT64Context::update_screen(uint32_t vi_origin) {
+    const uint64_t count = goldenpad_screen_update_count.fetch_add(1) + 1;
+    uint64_t presented = goldenpad_presented_count.load();
+    goldenpad_recomp_note_screen_progress(count, presented);
+    if (count == 1 || count % 300 == 0) {
+        fprintf(stderr, "[GoldenPadRecomp] render: presented %llu VI updates\n",
+            static_cast<unsigned long long>(count));
+        os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT,
+            "[GoldenPadRecomp] render: presented %{public}llu VI updates",
+            static_cast<unsigned long long>(count));
+    }
     VI_ORIGIN_REG = vi_origin;
 
+    // UIKit can temporarily make CAMetalLayer drawables unavailable while the
+    // app is backgrounded. Avoid entering RT64's presentation path until the
+    // host is active again; the next VI resumes from the current game state.
+    if (!goldenpad_recomp_is_app_active()) {
+        return;
+    }
     app->updateScreen();
+    presented = goldenpad_presented_count.fetch_add(1) + 1;
+    goldenpad_recomp_note_screen_progress(count, presented);
 }
 
 void zelda64::renderer::RT64Context::shutdown() {

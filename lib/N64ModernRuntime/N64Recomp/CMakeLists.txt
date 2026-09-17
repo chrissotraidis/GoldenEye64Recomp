@@ -166,6 +166,7 @@ target_sources(OfflineModRecomp PRIVATE
 target_link_libraries(OfflineModRecomp fmt rabbitizer tomlplusplus::tomlplusplus N64Recomp)
 
 # Live recompiler
+if (N64RECOMP_ENABLE_LIVE_RECOMP)
 project(LiveRecomp)
 add_library(LiveRecomp)
 
@@ -193,3 +194,8 @@ target_include_directories(LiveRecompTest PRIVATE
 )
 
 target_link_libraries(LiveRecompTest LiveRecomp)
+else()
+target_sources(N64Recomp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/LiveRecomp/shim_function_aot.cpp
+)
+endif()
