@@ -3,12 +3,12 @@
 #include <chrono>
 #include <atomic>
 #include <os/signpost.h>
-extern "C" void goldenpad_diagnostics_sample(uint32_t, uint64_t, uint64_t) __attribute__((weak_import));
-extern "C" int goldenpad_diagnostics_enabled() __attribute__((weak_import));
-extern "C" void goldenpad_diagnostics_surface(uint32_t, uint32_t) __attribute__((weak_import));
+extern "C" __attribute__((weak, noinline)) void goldenpad_diagnostics_sample(uint32_t, uint64_t, uint64_t) {}
+extern "C" __attribute__((weak, noinline)) int goldenpad_diagnostics_enabled() { return 0; }
+extern "C" __attribute__((weak, noinline)) void goldenpad_diagnostics_surface(uint32_t, uint32_t) {}
 namespace {
 using GPClock = std::chrono::steady_clock;
-static bool gpEnabled() { return goldenpad_diagnostics_sample && goldenpad_diagnostics_enabled && goldenpad_diagnostics_enabled(); }
+static bool gpEnabled() { return goldenpad_diagnostics_enabled(); }
 static uint64_t gpNanos() { return std::chrono::duration_cast<std::chrono::nanoseconds>(GPClock::now().time_since_epoch()).count(); }
 static os_log_t gpLog() { static auto log=os_log_create("com.chrissotraidis.goldenpad", "performance"); return log; }
 struct GPScope {
