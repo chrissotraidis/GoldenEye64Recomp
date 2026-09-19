@@ -1,4 +1,25 @@
 #include <memory>
+
+#include <chrono>
+#include <atomic>
+#include <os/signpost.h>
+extern "C" void goldenpad_diagnostics_sample(uint32_t, uint64_t, uint64_t) __attribute__((weak_import));
+extern "C" int goldenpad_diagnostics_enabled() __attribute__((weak_import));
+extern "C" void goldenpad_diagnostics_surface(uint32_t, uint32_t) __attribute__((weak_import));
+namespace {
+using GPClock = std::chrono::steady_clock;
+static bool gpEnabled() { return goldenpad_diagnostics_sample && goldenpad_diagnostics_enabled && goldenpad_diagnostics_enabled(); }
+static uint64_t gpNanos() { return std::chrono::duration_cast<std::chrono::nanoseconds>(GPClock::now().time_since_epoch()).count(); }
+static os_log_t gpLog() { static auto log=os_log_create("com.chrissotraidis.goldenpad", "performance"); return log; }
+struct GPScope {
+    uint32_t kind; uint64_t start=0; os_signpost_id_t id=OS_SIGNPOST_ID_INVALID;
+    explicit GPScope(uint32_t k):kind(k) {
+        if(gpEnabled()) { start=gpNanos(); if(os_signpost_enabled(gpLog())) { id=os_signpost_id_generate(gpLog()); os_signpost_interval_begin(gpLog(),id,"GoldenPad work","kind=%{public}u",kind); } }
+    }
+    ~GPScope() { if(start) { goldenpad_diagnostics_sample(kind,gpNanos()-start,0); if(id!=OS_SIGNPOST_ID_INVALID) os_signpost_interval_end(gpLog(),id,"GoldenPad work"); } }
+};
+}
+
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -337,6 +358,7 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
 zelda64::renderer::RT64Context::~RT64Context() = default;
 
 void zelda64::renderer::RT64Context::send_dl(const OSTask* task) {
+    GPScope diagnosticScope(0);
     const uint64_t count = goldenpad_display_list_count.fetch_add(1) + 1;
     goldenpad_recomp_note_display_list(count);
     if (count == 1 || count % 300 == 0) {
@@ -370,6 +392,7 @@ void zelda64::renderer::RT64Context::update_screen(uint32_t vi_origin) {
     if (!goldenpad_recomp_is_app_active()) {
         return;
     }
+    GPScope diagnosticScope(1);
     app->updateScreen();
     presented = goldenpad_presented_count.fetch_add(1) + 1;
     goldenpad_recomp_note_screen_progress(count, presented);
