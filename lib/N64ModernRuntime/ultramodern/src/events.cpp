@@ -152,9 +152,7 @@ void vi_thread_func() {
 
                 if (ultramodern::is_game_started()) {
                     if (events_context.vi.mq != NULLPTR) {
-                        if (osSendMesg(PASS_RDRAM events_context.vi.mq, events_context.vi.msg, OS_MESG_NOBLOCK) == -1) {
-                            //printf("Game skipped a VI frame!\n");
-                        }
+                        ultramodern::enqueue_external_message(events_context.vi.mq, events_context.vi.msg, false, false);
                     }
                 }
                 else {
@@ -170,9 +168,7 @@ void vi_thread_func() {
                 }
             }
             if (events_context.ai.mq != NULLPTR) {
-                if (osSendMesg(PASS_RDRAM events_context.ai.mq, events_context.ai.msg, OS_MESG_NOBLOCK) == -1) {
-                    //printf("Game skipped a AI frame!\n");
-                }
+                ultramodern::enqueue_external_message(events_context.ai.mq, events_context.ai.msg, false, false);
             }
         }
 
@@ -182,35 +178,20 @@ void vi_thread_func() {
     }
 }
 
-// Retry completion sends instead of dropping them: with a slow renderer the scheduler's
-// interrupt queue can be full of retrace messages when a task completes, and dropping
-// the SP/DP-complete message wedges games (like GoldenEye) that wait for RDP done.
-static void send_complete_retry(PTR(OSMesgQueue) mq, OSMesg msg) {
-    uint8_t* rdram = events_context.rdram;
-    using namespace std::chrono_literals;
-    while (true) {
-        {
-            std::lock_guard lock{ events_context.message_mutex };
-            if (osSendMesg(PASS_RDRAM mq, msg, OS_MESG_NOBLOCK) == 0) {
-                return;
-            }
-        }
-        std::this_thread::sleep_for(200us);
-    }
-}
-
 void sp_complete() {
 #if defined(N64MODERNRUNTIME_VERBOSE_LOGGING)
     fprintf(stderr, "[complete] SP -> mq %08X msg %08X\n", (uint32_t)events_context.sp.mq, (uint32_t)events_context.sp.msg);
 #endif
-    send_complete_retry(events_context.sp.mq, events_context.sp.msg);
+    std::lock_guard lock{ events_context.message_mutex };
+    ultramodern::enqueue_external_message(events_context.sp.mq, events_context.sp.msg, false, true);
 }
 
 void dp_complete() {
 #if defined(N64MODERNRUNTIME_VERBOSE_LOGGING)
     fprintf(stderr, "[complete] DP -> mq %08X msg %08X\n", (uint32_t)events_context.dp.mq, (uint32_t)events_context.dp.msg);
 #endif
-    send_complete_retry(events_context.dp.mq, events_context.dp.msg);
+    std::lock_guard lock{ events_context.message_mutex };
+    ultramodern::enqueue_external_message(events_context.dp.mq, events_context.dp.msg, false, true);
 }
 
 void task_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_ready) {

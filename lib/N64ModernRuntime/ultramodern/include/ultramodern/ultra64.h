@@ -2,6 +2,7 @@
 #define __ULTRA64_ultramodern_H__
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))
@@ -40,7 +41,7 @@ typedef uint8_t u8;
 #  define PASS_RDRAM rdram, 
 #  define PASS_RDRAM1 rdram
 #  define TO_PTR(type, var) ((type*)(&rdram[(uint64_t)var - 0xFFFFFFFF80000000]))
-#  define GET_MEMBER(type, addr, member) (addr + (intptr_t)&(((type*)nullptr)->member))
+#  define GET_MEMBER(type, addr, member) (addr + (intptr_t)offsetof(type, member))
 #  ifdef __cplusplus
 #    define NULLPTR (PTR(void))0
 #  endif

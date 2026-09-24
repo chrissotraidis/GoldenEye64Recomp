@@ -52,6 +52,7 @@ bool thread_queue_empty(RDRAM_ARG PTR(PTR(OSThread)) queue);
 PTR(OSThread) thread_queue_peek(RDRAM_ARG PTR(PTR(OSThread)) queue);
 
 // Message queues.
+void enqueue_external_message(PTR(OSMesgQueue) mq, OSMesg msg, bool jam, bool requeue_if_blocked);
 void wait_for_external_message(RDRAM_ARG1);
 void wait_for_external_message_timed(RDRAM_ARG1, u32 millis);
 
